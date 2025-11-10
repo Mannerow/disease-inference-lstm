@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import gzip
 import collections
+import re
 
 def load_mimic_data(data_dir):
     """
@@ -71,6 +72,52 @@ def filter_top_diseases(diagnoses_df, noteevents_df, top_diseases):
     
     return filtered, filtered_notes
 
+# Section 2.1
+# Need to find section headers in the discharge summaries
+def identify_sections(text):
+    # match section headers that may appear at start, middle, or end
+    section_pattern = r'(^|\n)\s*([A-Z][A-Za-z\s/&-]+:)\s*(\n|\Z)'
+    matches = re.findall(section_pattern, text)
+    return [m[1].rstrip(':') for m in matches]
+
+# Need to remove these
+# Section 2.1
+def filter_sections(text):
+    remove_sections = [
+        'Social History',
+        'Medications on Admission',
+        'Discharge Diagnosis',
+    ]
+
+    split_pattern = r'(\n\s*[A-Z][A-Za-z\s/&-]+:\s*\n)'
+    parts = re.split(split_pattern, text)
+
+    # keep only non-removed sections
+    filtered_parts = []
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        if re.match(r'\n\s*[A-Z][A-Za-z\s/&-]+:\s*\n', part):
+
+            # This is a section header
+            header = part.strip().rstrip(':')
+            if header not in remove_sections:
+                # Keep header + next content block
+                filtered_parts.append(part)
+                if i + 1 < len(parts):
+                    filtered_parts.append(parts[i + 1])
+            else:
+                # Skip header and content
+                i += 1  
+            i += 1 
+        else:
+            if not filtered_parts:
+                filtered_parts.append(part)
+            i += 1
+
+    return ''.join(filtered_parts)
+
+
 if __name__ == "__main__":
     data_directory = "data"
     top_n_diseases = 50
@@ -100,9 +147,7 @@ if __name__ == "__main__":
     print("Filtering for Top Diseases...")
     filtered_diagnoses, filtered_notes = filter_top_diseases(diagnoses, filtered_notes, top_diseases)
 
-
-
-
+    print("Identifying Sections in Discharge Summaries...")
 
 
 
