@@ -3,6 +3,8 @@ import os
 import gzip
 import collections
 import re
+from sklearn.model_selection import train_test_split
+import pickle
 
 # Symptom Lexicon (mocks UMLS 'sosy' terms). INstead of MetaMap
 SYMPTOMS = {
@@ -225,7 +227,64 @@ def build_symptom_dict(notes_df):
     print("Expected: 4200 symptoms")
     return symptom_to_index
 
+# Section 3.1, create binary label vectors indicating which of the top-N disease are presetn for each admission
+def build_disease_labels(filtered_diagnoses, filtered_notes, diease_to_index):
+    disease_labels = []
+    final_data = filtered_notes.copy()
 
+    for hadm_id in final_data['HADM_ID']:
+        # Get all diseases
+        admission_diseases = filtered_diagnoses[
+            filtered_diagnoses['HADM_ID'] == hadm_id
+        ]['ICD9_CODE_3DIGIT'].unique()
+        
+        # Create binary vector [0, 1, 0, 1, ...] for top-N diseases
+        label_vector = [1 if disease in admission_diseases else 0 
+                       for disease in disease_to_index.keys()]
+        
+        disease_labels.append(label_vector)
+    
+    final_data['DISEASE_LABELS'] = disease_labels
+    
+    print(f"Final dataset: {len(final_data)} admissions")
+    print(f"Average diseases per admission: {sum(sum(labels) for labels in disease_labels) / len(disease_labels):.2f}")
+    
+    return final_data
+
+# Section 3.3
+def split_data(final_data, train_frac=0.8, val_frac=0.1, test_frac=0.1, random_state=12):
+    # Split off test set
+    train_val_data, test_data = train_test_split(final_data, test_size=test_frac, random_state=random_state, shuffle=True)
+
+    # Split off val from train
+    # ex. val_frac/(train_frac + val_frac) = 0.1 / 0.9 = 0.1111....
+    train_data, val_data = train_test_split(train_val_data, test_size=val_frac/(train_frac + val_frac), random_state=random_state, shuffle=True)
+
+    print("Data split:")
+    print(f"  Train: {len(train_data)}")
+    print(f"  Validation: {len(val_data)}")
+    print(f"  Test: {len(test_data)}")
+
+    return train_data, val_data, test_data
+
+# Creates processed_data folder inside data/
+def save_processed_data(train_df, val_df, test_df, symptom_to_index, disease_to_index, output_dir='data/processed_data'):
+    os.makedirs(output_dir, exist_ok=True)
+    
+    train_df.to_pickle(os.path.join(output_dir, 'train_data.pkl'))
+    val_df.to_pickle(os.path.join(output_dir, 'val_data.pkl'))
+    test_df.to_pickle(os.path.join(output_dir, 'test_data.pkl'))
+    
+    # Save symptom and disease dictionaries. For Word2Vec and TF-1DF
+    # Ex. 'fever' -> 0
+    with open(os.path.join(output_dir, 'symptom_to_index.pkl'), 'wb') as f:
+        pickle.dump(symptom_to_index, f)
+    
+    # Ex. '250' -> 0
+    with open(os.path.join(output_dir, 'disease_to_index.pkl'), 'wb') as f:
+        pickle.dump(disease_to_index, f)
+    
+    print(f"Processed data saved to {output_dir}")
 
 if __name__ == "__main__":
     data_directory = "data"
@@ -280,4 +339,18 @@ if __name__ == "__main__":
 
     # map symtpoms to integers
     symptom_to_index = build_symptom_dict(final_notes_df)
+
+    print("Building symptom dictionary...")
+    symptom_to_index = build_symptom_dict(final_notes_df)
+    
+    print("Creating multi-label disease vectors...")
+    final_data = build_disease_labels(filtered_diagnoses, final_notes_df, disease_to_index)
+    
+    print("Splitting into train/val/test...")
+    train_df, val_df, test_df = split_data(final_data)
+    
+    print("Saving processed data...")
+    save_processed_data(train_df, val_df, test_df, symptom_to_index, disease_to_index)
+    
+    print("\nPreprocessing complete.")
 
